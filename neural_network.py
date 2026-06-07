@@ -2,12 +2,14 @@ import torch.nn as nn
 from torchtyping import TensorType
 
 class VanillaNeuralNetwork(nn.Module):
-    def __init__(self, model_dim: int):
+    def __init__(self, model_dim: int, dropout: float = 0.1):
         super().__init__()
-        self.up_projection = nn.Linear(model_dim, model_dim * 4)
-        self.relu = nn.ReLU()
-        self.down_projection = nn.Linear(model_dim * 4, model_dim)
-        self.dropout = nn.Dropout(0.2)
+        self.net = nn.Sequential(
+            nn.Linear(model_dim, 4 * model_dim),
+            nn.GELU(),
+            nn.Linear(4 * model_dim, model_dim),
+            nn.Dropout(dropout),
+        )
 
     def forward(self, x: TensorType[float]) -> TensorType[float]:
-        return self.dropout(self.down_projection(self.relu(self.up_projection(x))))
+        return self.net(x)

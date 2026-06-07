@@ -4,43 +4,52 @@ from torchtyping import TensorType
 
 
 class SingleHeadAttention(nn.Module):
-    def __init__(self, model_dim: int, head_size: int):
+    def __init__(
+        self, model_dim: int, head_size: int, context_length: int, dropout: float = 0.1
+    ):
         super().__init__()
         self.key_gen = nn.Linear(model_dim, head_size, bias=False)
         self.query_gen = nn.Linear(model_dim, head_size, bias=False)
         self.value_gen = nn.Linear(model_dim, head_size, bias=False)
+        self.dropout = nn.Dropout(dropout)
+
+        self.register_buffer(
+            "tril",
+            torch.tril(torch.ones(context_length, context_length, dtype=torch.bool)),
+        )
 
     def forward(self, embedded: TensorType[float]) -> TensorType[float]:
-        k = self.key_gen(embedded)
-        q = self.query_gen(embedded)
-        v = self.value_gen(embedded)
+        B, T, C = embedded.shape
 
-        scores = q @ torch.transpose(k, 1, 2)
-        context_length, attention_dim = k.shape[1], k.shape[2]
-        scores = scores / (attention_dim**0.5)
+        k = self.key_gen(embedded)  # (B, T, head_size)
+        q = self.query_gen(embedded)  # (B, T, head_size)
+        v = self.value_gen(embedded)  # (B, T, head_size)
 
-        lower_triangular = torch.tril(torch.ones(context_length, context_length))
-        mask = lower_triangular == 0
-        mask = mask.to(scores.device)
-        scores = scores.masked_fill(mask, float("-inf"))
-        scores = nn.functional.softmax(scores, dim=2)
+        head_size = k.shape[-1]
+        scores = q @ k.transpose(1, 2) / (head_size**0.5)  # (B, T, T)
+
+        scores = scores.masked_fill(~self.tril[:T, :T], float("-inf"))
+        scores = nn.functional.softmax(scores, dim=-1)
+        scores = self.dropout(scores)
 
         return scores @ v
 
 
 class MultiHeadedSelfAttention(nn.Module):
-    def __init__(self, model_dim: int, num_heads: int):
+    def __init__(
+        self, model_dim: int, num_heads: int, context_length: int, dropout: float = 0.1
+    ):
         super().__init__()
-        self.att_heads = nn.ModuleList()
-        for i in range(num_heads):
-            self.att_heads.append(
-                SingleHeadAttention(model_dim, model_dim // num_heads)
-            )
+        head_size = model_dim // num_heads
+        self.att_heads = nn.ModuleList(
+            [
+                SingleHeadAttention(model_dim, head_size, context_length, dropout)
+                for _ in range(num_heads)
+            ]
+        )
         self.output_proj = nn.Linear(model_dim, model_dim, bias=False)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, embedded: TensorType[float]) -> TensorType[float]:
-        head_outputs = []
-        for head in self.att_heads:
-            head_outputs.append(head(embedded))
-        concatenated = torch.cat(head_outputs, dim=2)
-        return self.output_proj(concatenated)
+        concatenated = torch.cat([h(embedded) for h in self.att_heads], dim=-1)
+        return self.dropout(self.output_proj(concatenated))
