@@ -24,15 +24,23 @@ warmup_iters = 250
 dropout = 0.1
 weight_decay = 0.1
 
-CHECKPOINT_BEST = "data/brodiaga_best.pt"
-CHECKPOINT_LAST = "data/brodiaga_last.pt"
-DATA_FILE = "data/dataset2.txt"
+CHECKPOINT_BEST = "data/brodiaga_best_2.pt"
+CHECKPOINT_LAST = "data/brodiaga_last_2.pt"
+DATA_FILE = "data/dataset_augmented.txt"
+
+MODEL_CONFIG = dict(
+    model_dim = n_embd,
+    num_blocks = n_layer,
+    num_heads = n_head,
+    num_kv_heads = n_kv_head,
+    block_size = block_size,
+)
 
 device = torch.device(
     "mps" if torch.backends.mps.is_available() else "cpu"
 )
-
 torch.manual_seed(1337)
+torch.set_float32_matmul_precision("high")
 
 tok = TiktokenWrapper()
 vocab_size = tok.vocab_size
@@ -60,11 +68,8 @@ loader = torch.utils.data.DataLoader(
 model = GPT(
     vocab_size=vocab_size,
     context_length=block_size,
-    model_dim=n_embd,
-    num_blocks=n_layer,
-    num_heads=n_head,
-    num_kv_heads=n_kv_head,
     dropout=dropout,
+    **{k: v for k, v in MODEL_CONFIG.items() if k != "block_size"},
 )
 m = model.to(device)
 
@@ -146,6 +151,7 @@ def save_checkpoint(path: str, step: int, val_loss: float):
             "val_loss": val_loss,
             "vocab_size": vocab_size,
             "tokenizer_dir": "data/tokenizer",
+            "model_config": MODEL_CONFIG,
         },
         path,
     )
